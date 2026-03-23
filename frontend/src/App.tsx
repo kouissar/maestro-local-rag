@@ -1,0 +1,479 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Typography, 
+  ThemeProvider, 
+  CssBaseline, 
+  Paper, 
+  TextField, 
+  Button, 
+  List, 
+  ListItem, 
+  ListItemText, 
+  IconButton, 
+  CircularProgress,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Drawer,
+  ListItemIcon
+} from '@mui/material';
+import SendIcon from '@mui/icons-material/Send';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import DescriptionIcon from '@mui/icons-material/Description';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MenuIcon from '@mui/icons-material/Menu';
+import axios from 'axios';
+import theme from './theme';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+interface Message {
+  text: string;
+  sender: 'user' | 'bot';
+}
+
+function App() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState('llama3.2:latest');
+  const [documents, setDocuments] = useState<string[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    fetchModels();
+    fetchDocuments();
+  }, []);
+
+  const fetchModels = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/models`);
+      setModels(response.data.models);
+      if (response.data.models.length > 0 && !response.data.models.includes(selectedModel)) {
+        setSelectedModel(response.data.models[0]);
+      }
+    } catch (error) {
+      console.error("Error fetching models:", error);
+    }
+  };
+
+  const fetchDocuments = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/documents`);
+      setDocuments(response.data.documents);
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    const userMsg: Message = { text: input, sender: 'user' };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/query/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: input,
+          model: selectedModel
+        }),
+      });
+
+      if (!response.ok) throw new Error('Network response was not ok');
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      
+      // Add an initial empty bot message
+      const botMsg: Message = { text: '', sender: 'bot' };
+      setMessages(prev => [...prev, botMsg]);
+
+      let fullText = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
+        
+        // Update the last message (the bot's message) with the new text
+        setMessages(prev => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], text: fullText };
+          return newMessages;
+        });
+      }
+    } catch (error) {
+      console.error("Error querying:", error);
+      setMessages(prev => [...prev, { text: "Error fetching response. Is the backend running?", sender: 'bot' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      await axios.post(`${API_BASE_URL}/upload`, formData);
+      setMessages(prev => [...prev, { text: `File "${file.name}" uploaded and processed.`, sender: 'bot' }]);
+      fetchDocuments();
+    } catch (error) {
+      console.error("Error uploading:", error);
+      alert("Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!window.confirm("Are you sure you want to clear the entire database?")) return;
+    try {
+      await axios.post(`${API_BASE_URL}/clear`);
+      setMessages([]);
+      setDocuments([]);
+      alert("History and database cleared.");
+    } catch (error) {
+      console.error("Error clearing:", error);
+    }
+  };
+
+  const handleDeleteDocument = async (filename: string) => {
+    if (!window.confirm(`Delete "${filename}" from the database?`)) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/documents/${filename}`);
+      fetchDocuments();
+    } catch (error) {
+      console.error("Error deleting document:", error);
+    }
+  };
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ 
+        display: 'flex', 
+        height: '100vh', 
+        overflow: 'hidden', 
+        bgcolor: 'background.default',
+        color: 'text.primary',
+        fontFamily: '"Outfit", sans-serif'
+      }}>
+        {/* Sidebar */}
+        <Drawer
+          variant="persistent"
+          anchor="left"
+          open={sidebarOpen}
+          sx={{
+            width: 320,
+            flexShrink: 0,
+            '& .MuiDrawer-paper': {
+              width: 320,
+              boxSizing: 'border-box',
+              bgcolor: 'background.paper',
+              borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+              p: 2,
+            },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, px: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
+              Knowledge Base
+            </Typography>
+            <IconButton onClick={() => setSidebarOpen(false)} size="small" sx={{ opacity: 0.7 }}>
+              <MenuIcon />
+            </IconButton>
+          </Box>
+          
+          <Box sx={{ mb: 4, px: 1 }}>
+            <Button
+              variant="contained"
+              fullWidth
+              component="label"
+              startIcon={uploading ? <CircularProgress size={18} color="inherit" /> : <CloudUploadIcon />}
+              disabled={uploading}
+              sx={{ py: 1.5, mb: 2 }}
+            >
+              {uploading ? 'Processing...' : 'Upload Data'}
+              <input type="file" hidden onChange={handleFileUpload} accept=".pdf,.txt,.md" />
+            </Button>
+            <Button
+              variant="outlined"
+              fullWidth
+              color="error"
+              startIcon={<DeleteSweepIcon />}
+              onClick={handleClear}
+              sx={{ py: 1.5, borderColor: 'rgba(211, 47, 47, 0.3)', '&:hover': { borderColor: 'error.main' } }}
+            >
+              Clear Workspace
+            </Button>
+          </Box>
+
+          <Typography variant="overline" sx={{ px: 2, mb: 1, display: 'block', opacity: 0.5, fontWeight: 700 }}>
+            Source Documents
+          </Typography>
+
+          <List sx={{ flexGrow: 1, overflowY: 'auto' }}>
+            {documents.length === 0 && (
+              <Box sx={{ p: 4, textAlign: 'center', opacity: 0.4 }}>
+                <DescriptionIcon sx={{ fontSize: 40, mb: 1 }} />
+                <Typography variant="body2">No sources yet</Typography>
+              </Box>
+            )}
+            {documents.map((doc) => (
+              <ListItem
+                key={doc}
+                secondaryAction={
+                  <IconButton edge="end" onClick={() => handleDeleteDocument(doc)} size="small" 
+                    sx={{ opacity: 0, '.MuiListItem-root:hover &': { opacity: 0.5 }, '&:hover': { opacity: '1 !important', color: 'error.main' } }}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                }
+                sx={{ 
+                  mb: 0.5, 
+                  bgcolor: 'rgba(255, 255, 255, 0.02)',
+                  '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.05)' }
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 36 }}>
+                  <DescriptionIcon color="primary" fontSize="small" sx={{ opacity: 0.7 }} />
+                </ListItemIcon>
+                <ListItemText 
+                  primary={doc} 
+                  primaryTypographyProps={{ 
+                    variant: 'body2', 
+                    noWrap: true,
+                    fontWeight: 500
+                  }} 
+                />
+              </ListItem>
+            ))}
+          </List>
+          
+          <Box sx={{ mt: 'auto', pt: 2, borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="model-select-label">Brain Engine</InputLabel>
+              <Select
+                labelId="model-select-label"
+                value={selectedModel}
+                label="Brain Engine"
+                onChange={(e) => setSelectedModel(e.target.value)}
+                sx={{ borderRadius: 2 }}
+              >
+                {models.map(model => (
+                  <MenuItem key={model} value={model}>{model}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </Drawer>
+
+        {/* Main Content Area */}
+        <Box 
+          component="main" 
+          sx={{ 
+            flexGrow: 1, 
+            display: 'flex', 
+            flexDirection: 'column',
+            position: 'relative',
+            height: '100vh',
+            transition: theme.transitions.create(['margin', 'width'], {
+              easing: theme.transitions.easing.sharp,
+              duration: theme.transitions.duration.leavingScreen,
+            }),
+            ...(sidebarOpen && {
+              ml: 0, // In flex, we don't need ML if it's dynamic
+            }),
+          }}
+        >
+          {/* Header */}
+          <Box className="glass" sx={{ 
+            p: 2, 
+            px: 4, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between',
+            zIndex: 10,
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              {!sidebarOpen && (
+                <IconButton onClick={() => setSidebarOpen(true)} size="small">
+                  <MenuIcon />
+                </IconButton>
+              )}
+              <Typography variant="h5" sx={{ fontWeight: 800, background: 'linear-gradient(90deg, #818cf8, #fb7185)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                Maestro RAG
+              </Typography>
+            </Box>
+            <Typography variant="body2" sx={{ opacity: 0.6, fontWeight: 500 }}>
+              {selectedModel}
+            </Typography>
+          </Box>
+
+          {/* Chat Messages */}
+          <Box sx={{ 
+            flexGrow: 1, 
+            overflowY: 'auto', 
+            p: 4, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: 3,
+            scrollBehavior: 'smooth',
+            maxWidth: '1000px',
+            width: '100%',
+            mx: 'auto'
+          }}>
+            {messages.length === 0 && (
+              <Box sx={{ 
+                display: 'flex', 
+                flexDirection: 'column',
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                height: '100%', 
+                opacity: 0.5,
+                textAlign: 'center'
+              }}>
+                <Box sx={{ 
+                  width: 80, 
+                  height: 80, 
+                  borderRadius: '50%', 
+                  bgcolor: 'rgba(129, 140, 248, 0.1)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  mb: 2
+                }}>
+                  <SendIcon sx={{ fontSize: 32, color: 'primary.main', opacity: 0.8 }} />
+                </Box>
+                <Typography variant="h6" sx={{ mb: 1 }}>How can I help today?</Typography>
+                <Typography variant="body2">Upload sources to start a contextual conversation.</Typography>
+              </Box>
+            )}
+            
+            {messages.map((msg, index) => (
+              <Box 
+                key={index} 
+                className="message-appear"
+                sx={{ 
+                  display: 'flex', 
+                  justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start',
+                  width: '100%'
+                }}
+              >
+                <Paper 
+                  elevation={0}
+                  sx={{ 
+                    p: 2.5, 
+                    px: 3,
+                    maxWidth: '85%', 
+                    bgcolor: msg.sender === 'user' ? 'primary.main' : 'rgba(255, 255, 255, 0.03)',
+                    color: msg.sender === 'user' ? 'white' : 'text.primary',
+                    borderRadius: msg.sender === 'user' ? '24px 24px 4px 24px' : '24px 24px 24px 4px',
+                    border: msg.sender === 'user' ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+                    boxShadow: msg.sender === 'user' ? '0 4px 20px rgba(99, 102, 241, 0.3)' : 'none',
+                    lineHeight: 1.6
+                  }}
+                >
+                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
+                    {msg.text}
+                  </Typography>
+                </Paper>
+              </Box>
+            ))}
+            
+            {loading && (
+              <Box sx={{ display: 'flex', gap: 1, p: 2, alignItems: 'center' }}>
+                <CircularProgress size={16} thickness={5} />
+                <Typography variant="caption" sx={{ opacity: 0.6, fontWeight: 600, letterSpacing: 1 }}>THINKING...</Typography>
+              </Box>
+            )}
+          </Box>
+
+          {/* Input Area */}
+          <Box sx={{ 
+            p: 4, 
+            pt: 2,
+            maxWidth: '1000px',
+            width: '100%',
+            mx: 'auto'
+          }}>
+            <Paper 
+              elevation={3}
+              className="glass"
+              sx={{ 
+                p: 1, 
+                px: 2,
+                display: 'flex', 
+                gap: 1.5,
+                borderRadius: '20px',
+                alignItems: 'center',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+              }}
+            >
+              <TextField
+                fullWidth
+                multiline
+                maxRows={4}
+                variant="standard"
+                placeholder="Message Maestro..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                disabled={loading}
+                InputProps={{
+                  disableUnderline: true,
+                  sx: { py: 1, px: 1, fontSize: '1rem' }
+                }}
+              />
+              <IconButton 
+                color="primary" 
+                onClick={handleSend}
+                disabled={loading || !input.trim()}
+                sx={{ 
+                  bgcolor: 'primary.main', 
+                  color: 'white',
+                  '&:hover': { bgcolor: 'primary.dark' },
+                  '&.Mui-disabled': { bgcolor: 'rgba(255, 255, 255, 0.05)', color: 'rgba(255, 255, 255, 0.1)' },
+                  width: 44,
+                  height: 44,
+                  transition: 'all 0.2s'
+                }}
+              >
+                <SendIcon fontSize="small" />
+              </IconButton>
+            </Paper>
+            <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', mt: 1.5, opacity: 0.4 }}>
+              Maestro can make mistakes. Check important info.
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    </ThemeProvider>
+  );
+}
+
+export default App;

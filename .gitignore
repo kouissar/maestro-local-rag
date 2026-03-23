@@ -1,0 +1,40 @@
+# Ignore build and runtime folders
+node_modules/
+dist/
+build/
+.npm/
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+.env
+.pytest_cache/
+.coverage
+.cache
+pip-wheel-metadata/
+
+# Application data (RAG specific)
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/chroma_db/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# VS Code / Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+data/
