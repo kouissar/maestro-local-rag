@@ -2,12 +2,17 @@
 
 Maestro RAG is a powerful retrieval-augmented generation (RAG) assistant that allows you to chat with your own documents using local LLMs via Ollama. It features a modern, sleek interface with real-time token streaming and document management capabilities.
 
+![Maestro UI](maestro_ui.png)
+
 ## Features
 
 - **Local RAG**: Chat with your PDFs, text files, and markdown documents locally.
+- **Citations & Sources**: Collapsible sections listing the specific source documents and text snippets used to generate every answer.
+- **Performance Tracking**: Built-in metrics for every response, including latency, model engine + size, context retrieval chunks, and token counts (In/Out).
+- **Consistent Embeddings**: Uses a dedicated high-performance embedding model (`nomic-embed-text`) to ensure stability across different chat models.
 - **Streaming Responses**: Real-time, token-by-token responses like ChatGPT.
 - **Document Management**: Easily upload, list, and delete documents from your knowledge base.
-- **Model Selection**: Switch between different local models hosted on Ollama.
+- **Model Selection**: Switch between different local models (like `llama3.2:1b`, `gemma3`, etc.) hosted on Ollama without re-indexing.
 - **Premium UI**: Modern dark-mode interface with glassmorphism and smooth animations.
 
 ## Prerequisites
@@ -20,9 +25,10 @@ Maestro RAG is a powerful retrieval-augmented generation (RAG) assistant that al
 
 ### 1. Ollama Setup
 
-Ensure Ollama is running and you have at least one model pulled:
+Ensure Ollama is running and you have the required models:
 ```bash
 ollama pull llama3.2
+ollama pull nomic-embed-text  # Required for consistent embeddings
 ```
 
 ### 2. Backend Setup
@@ -71,8 +77,9 @@ Markdown files are parsed significantly faster and provide cleaner context for t
 
 ## How to use
 
-1.  **Convert PDFs (Optional)**: If you have large PDFs, use the `pdf_to_md.py` utility to convert them to `.md` for faster processing.
-2.  **Upload Documents**: Use the "Upload Data" button in the sidebar to add PDFs, `.txt`, or `.md` files to your knowledge base.
-3.  **Select Model**: Choose your preferred Ollama model from the dropdown in the sidebar.
-4.  **Chat**: Type your question in the input field. Maestro will retrieve relevant context from your documents to provide an accurate answer.
-5.  **Manage Sources**: View and delete uploaded documents from the sidebar.
+1.  **Prepare Documents**: For the best performance, use the `pdf_to_md.py` utility on large PDF files.
+2.  **Upload Data**: Use the "Upload Data" button in the sidebar. Documents are indexed using `nomic-embed-text`.
+3.  **Select Model**: Choose your preferred chat engine (e.g., `llama3.2:1b` for speed or `latest` for quality).
+4.  **Chat**: Maestro will retrieve the top 3 most relevant context chunks and cite them in the response.
+5.  **Review Performance**: Click "Performance Details" on any message to see exact inference metrics.
+6.  **Manage Sources**: View or delete sources from the Knowledge Base sidebar. To start completely fresh, use "Clear Workspace".
