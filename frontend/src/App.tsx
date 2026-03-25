@@ -30,9 +30,25 @@ import theme from './theme';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+interface Performance {
+  model: string;
+  size: string;
+  latency: string;
+  chunks: number;
+  tokens_in: number | string;
+  tokens_out: number | string;
+}
+
+interface Source {
+  source: string;
+  content: string;
+}
+
 interface Message {
   text: string;
   sender: 'user' | 'bot';
+  sources?: Source[];
+  performance?: Performance;
 }
 
 function App() {
@@ -44,6 +60,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('llama3.2:latest');
   const [documents, setDocuments] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     fetchModels();
@@ -102,18 +119,47 @@ function App() {
       setMessages(prev => [...prev, botMsg]);
 
       let fullText = '';
+      let sources: Source[] = [];
+      let perf: Performance | undefined = undefined;
       
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         
         const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
         
-        // Update the last message (the bot's message) with the new text
+        // Handle multiple potential lines of metadata
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+           if (line.startsWith('SOURCE_METADATA:')) {
+             try {
+               sources = JSON.parse(line.replace('SOURCE_METADATA:', ''));
+             } catch (e) {
+               console.error("Error parsing source metadata", e);
+             }
+           } else if (line.startsWith('PERFORMANCE_METRICS:')) {
+             try {
+               perf = JSON.parse(line.replace('PERFORMANCE_METRICS:', ''));
+             } catch (e) {
+               console.error("Error parsing performance metrics", e);
+             }
+           } else if (line) {
+             // Avoid adding the actual control lines to fullText if they were on the same chunk
+             if (!line.startsWith('SOURCE_METADATA:') && !line.startsWith('PERFORMANCE_METRICS:')) {
+                fullText += line;
+             }
+           }
+        }
+        
+        // Update the last message
         setMessages(prev => {
           const newMessages = [...prev];
-          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], text: fullText };
+          newMessages[newMessages.length - 1] = { 
+            ...newMessages[newMessages.length - 1], 
+            text: fullText,
+            sources: sources.length > 0 ? sources : newMessages[newMessages.length - 1].sources,
+            performance: perf || newMessages[newMessages.length - 1].performance
+          };
           return newMessages;
         });
       }
@@ -130,11 +176,40 @@ function App() {
     if (!file) return;
 
     setUploading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      await axios.post(`${API_BASE_URL}/upload`, formData);
+      const response = await fetch(`${API_BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      if (!response.body) throw new Error('No progress stream');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(Boolean);
+        
+        for (const line of lines) {
+          if (line.startsWith('Error:')) {
+             throw new Error(line);
+          }
+          const p = parseInt(line);
+          if (!isNaN(p)) {
+            setUploadProgress(p);
+          }
+        }
+      }
+
       setMessages(prev => [...prev, { text: `File "${file.name}" uploaded and processed.`, sender: 'bot' }]);
       fetchDocuments();
     } catch (error) {
@@ -142,6 +217,7 @@ function App() {
       alert("Upload failed.");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -209,11 +285,11 @@ function App() {
               variant="contained"
               fullWidth
               component="label"
-              startIcon={uploading ? <CircularProgress size={18} color="inherit" /> : <CloudUploadIcon />}
+              startIcon={uploading ? <CircularProgress size={18} color="inherit" variant={uploadProgress !== null ? "determinate" : "indeterminate"} value={uploadProgress || 0} /> : <CloudUploadIcon />}
               disabled={uploading}
               sx={{ py: 1.5, mb: 2 }}
             >
-              {uploading ? 'Processing...' : 'Upload Data'}
+              {uploading ? (uploadProgress !== null ? `Processing ${uploadProgress}%` : 'Processing...') : 'Upload Data'}
               <input type="file" hidden onChange={handleFileUpload} accept=".pdf,.txt,.md" />
             </Button>
             <Button
@@ -396,6 +472,99 @@ function App() {
                   <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
                     {msg.text}
                   </Typography>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <Box sx={{ mt: 2, pt: 1, borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <Box 
+                        component="details" 
+                        sx={{ 
+                          '& summary': { 
+                            cursor: 'pointer', 
+                            listStyle: 'none', 
+                            opacity: 0.4, 
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            letterSpacing: 0.5,
+                            '&:hover': { opacity: 0.7 }
+                          },
+                          '& summary::-webkit-details-marker': { display: 'none' }
+                        }}
+                      >
+                        <Box component="summary">CITATIONS ({msg.sources.length})</Box>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1.5 }}>
+                          {msg.sources.map((s, i) => (
+                            <Box key={i} sx={{ 
+                              p: 1, 
+                              bgcolor: 'rgba(255, 255, 255, 0.02)', 
+                              borderRadius: 1,
+                              borderLeft: '2px solid',
+                              borderColor: 'primary.main',
+                            }}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block' }}>
+                                {s.source}
+                              </Typography>
+                              <Typography variant="caption" sx={{ opacity: 0.7, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                "{s.content}"
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    </Box>
+                  )}
+
+                  {msg.performance && (
+                    <Box sx={{ mt: 1, pt: 1 }}>
+                      <Box 
+                        component="details" 
+                        sx={{ 
+                          '& summary': { 
+                            cursor: 'pointer', 
+                            listStyle: 'none', 
+                            opacity: 0.4, 
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            letterSpacing: 0.5,
+                            '&:hover': { opacity: 0.7 }
+                          },
+                          '& summary::-webkit-details-marker': { display: 'none' }
+                        }}
+                      >
+                        <Box component="summary">PERFORMANCE DETAILS</Box>
+                        <Box sx={{ 
+                          mt: 1, 
+                          p: 1.5, 
+                          bgcolor: 'rgba(0,0,0,0.15)', 
+                          borderRadius: 1, 
+                          display: 'grid', 
+                          gridTemplateColumns: 'repeat(2, 1fr)',
+                          gap: 1.5
+                        }}>
+                          <Box sx={{ gridColumn: 'span 2', borderBottom: '1px solid rgba(255,255,255,0.05)', pb: 0.5, mb: 0.5 }}>
+                            <Typography variant="caption" sx={{ display: 'block', opacity: 0.5, fontSize: '0.6rem' }}>MODEL ENGINE</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                              {msg.performance.model} ({msg.performance.size})
+                            </Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" sx={{ display: 'block', opacity: 0.5, fontSize: '0.6rem' }}>LATENCY</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700 }}>{msg.performance.latency}</Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" sx={{ display: 'block', opacity: 0.5, fontSize: '0.6rem' }}>RETRIEVAL</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700 }}>{msg.performance.chunks} chunks</Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" sx={{ display: 'block', opacity: 0.5, fontSize: '0.6rem' }}>TOKENS IN</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700 }}>{msg.performance.tokens_in}</Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" sx={{ display: 'block', opacity: 0.5, fontSize: '0.6rem' }}>TOKENS OUT</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700 }}>{msg.performance.tokens_out}</Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  )}
                 </Paper>
               </Box>
             ))}

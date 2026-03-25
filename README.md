@@ -60,9 +60,19 @@ npm run dev
 ```
 The application will be available at `http://localhost:5173`.
 
+### 3. PDF to Markdown Utility
+
+To speed up processing of large PDFs, we provide a utility to convert them to Markdown before ingestion:
+
+```bash
+python3 pdf_to_md.py <path_to_pdf> -o <output_path.md>
+```
+Markdown files are parsed significantly faster and provide cleaner context for the RAG engine.
+
 ## How to use
 
-1.  **Upload Documents**: Use the "Upload Data" button in the sidebar to add PDFs, `.txt`, or `.md` files to your knowledge base.
-2.  **Select Model**: Choose your preferred Ollama model from the dropdown in the sidebar.
-3.  **Chat**: Type your question in the input field. Maestro will retrieve relevant context from your documents to provide an accurate answer.
-4.  **Manage Sources**: View and delete uploaded documents from the sidebar.
+1.  **Convert PDFs (Optional)**: If you have large PDFs, use the `pdf_to_md.py` utility to convert them to `.md` for faster processing.
+2.  **Upload Documents**: Use the "Upload Data" button in the sidebar to add PDFs, `.txt`, or `.md` files to your knowledge base.
+3.  **Select Model**: Choose your preferred Ollama model from the dropdown in the sidebar.
+4.  **Chat**: Type your question in the input field. Maestro will retrieve relevant context from your documents to provide an accurate answer.
+5.  **Manage Sources**: View and delete uploaded documents from the sidebar.

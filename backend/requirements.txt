@@ -12,3 +12,4 @@ pypdf
 unstructured
 markdown
 python-multipart
+pymupdf

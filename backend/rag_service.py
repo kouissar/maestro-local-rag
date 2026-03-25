@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import List
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredMarkdownLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_chroma import Chroma
@@ -18,27 +18,29 @@ COLLECTION_NAME = "rag_collection"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+EMBEDDING_MODEL = "nomic-embed-text"
+TOP_K = 3 # Optimal for small models like 1B/3B and slow hardware
+
 class RAGService:
     def __init__(self, model_name="llama3.2:latest"):
         self.model_name = model_name
+        self.embedding_model = EMBEDDING_MODEL
         self._init_vector_store()
 
     def _init_vector_store(self):
-        self.embeddings = OllamaEmbeddings(model=self.model_name)
+        self.embeddings = OllamaEmbeddings(model=self.embedding_model)
         self.vector_store = Chroma(
             collection_name=COLLECTION_NAME,
             embedding_function=self.embeddings,
             persist_directory=CHROMA_PATH
         )
 
-    def process_document(self, file_path: str) -> int:
+    def process_document(self, file_path: str):
         ext = os.path.splitext(file_path)[1].lower()
         if ext == ".pdf":
             loader = PyPDFLoader(file_path)
-        elif ext == ".txt":
+        elif ext == ".txt" or ext == ".md":
             loader = TextLoader(file_path)
-        elif ext == ".md":
-            loader = UnstructuredMarkdownLoader(file_path)
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
@@ -50,8 +52,18 @@ class RAGService:
         for chunk in chunks:
             chunk.metadata["source_file"] = os.path.basename(file_path)
         
-        self.vector_store.add_documents(chunks)
-        return len(chunks)
+        total_chunks = len(chunks)
+        if total_chunks == 0:
+            yield 100
+            return
+
+        # Add documents in batches to show progress
+        batch_size = 5
+        for i in range(0, total_chunks, batch_size):
+            batch = chunks[i:i+batch_size]
+            self.vector_store.add_documents(batch)
+            progress = min(100, int(((i + len(batch)) / total_chunks) * 100))
+            yield progress
 
     def query(self, question: str, model_name: str = None, stream: bool = False):
         if model_name and model_name != self.model_name:
@@ -79,14 +91,30 @@ class RAGService:
         )
         
         question_answer_chain = create_stuff_documents_chain(llm, prompt)
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
+        retriever = self.vector_store.as_retriever(search_kwargs={"k": TOP_K})
         rag_chain = create_retrieval_chain(retriever, question_answer_chain)
         
+        import time
+        start_time = time.time()
         if stream:
             return rag_chain.stream({"input": question})
         else:
             response = rag_chain.invoke({"input": question})
-            return response["answer"]
+            latency = time.time() - start_time
+            sources = []
+            for doc in response.get("context", []):
+                sources.append({
+                    "source": doc.metadata.get("source_file", "Unknown"),
+                    "content": doc.page_content[:200] + "..." # Snippet
+                })
+            return {
+                "answer": response["answer"],
+                "sources": sources,
+                "performance": {
+                    "latency": f"{latency:.2f}s",
+                    "chunks": len(sources)
+                }
+            }
 
     def list_documents(self) -> List[str]:
         # Get all documents from the collection
