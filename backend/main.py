@@ -1,6 +1,8 @@
 import os
 import requests
 import json
+import uuid
+from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -23,6 +25,7 @@ rag_service = RAGService()
 class QueryRequest(BaseModel):
     question: str
     model: str = "llama3.2:latest"
+    session_id: Optional[str] = None
 
 class QueryResponse(BaseModel):
     answer: str
@@ -54,6 +57,19 @@ async def query_document(request: QueryRequest):
 @app.post("/query/stream")
 async def query_document_stream(request: QueryRequest):
     try:
+        from datetime import datetime
+        session_id = request.session_id or datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        # Load history if session exists
+        history = rag_service.load_session(session_id)
+        
+        # Convert history for LangChain (Human/AI alternates)
+        chat_history = []
+        for msg in history:
+            if msg["sender"] == "user":
+                chat_history.append(("human", msg["text"]))
+            else:
+                chat_history.append(("ai", msg["text"]))
+        
         def generate():
             import time
             start_time = time.time()
@@ -63,7 +79,13 @@ async def query_document_stream(request: QueryRequest):
             full_answer = ""
             ans_chunk = None
             
-            for chunk in rag_service.query(request.question, request.model, stream=True):
+            # Start generator
+            gen = rag_service.query(request.question, request.model, stream=True, chat_history=chat_history)
+            
+            # Prefix with session info
+            yield f"SESSION_ID:{session_id}\n"
+            
+            for chunk in gen:
                 if "context" in chunk:
                     chunk_count = len(chunk["context"])
                     context_text = "".join([doc.page_content for doc in chunk["context"]])
@@ -98,6 +120,13 @@ async def query_document_stream(request: QueryRequest):
             
             if tokens_out == 0:
                 tokens_out = len(full_answer) // 4
+            
+            # Save to history
+            new_msgs = [
+                {"text": request.question, "sender": "user"},
+                {"text": full_answer, "sender": "bot"}
+            ]
+            rag_service.save_session(session_id, history + new_msgs)
             
             model_size = "Unknown"
             try:
@@ -160,6 +189,19 @@ async def delete_document(filename: str):
 async def clear_db():
     rag_service.clear_database()
     return {"status": "database cleared"}
+
+@app.get("/sessions")
+async def list_sessions():
+    return {"sessions": rag_service.list_sessions()}
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    return {"messages": rag_service.load_session(session_id)}
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    rag_service.delete_session(session_id)
+    return {"status": "session deleted"}
 
 if __name__ == "__main__":
     import uvicorn

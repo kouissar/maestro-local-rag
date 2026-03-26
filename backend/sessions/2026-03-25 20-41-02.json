@@ -1,0 +1,10 @@
+[
+  {
+    "text": "test chat history",
+    "sender": "user"
+  },
+  {
+    "text": "I'm ready to assist with your questions. This is a new conversation, and I don't have any prior knowledge or context. What would you like to discuss?",
+    "sender": "bot"
+  }
+]

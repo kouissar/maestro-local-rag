@@ -25,6 +25,11 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MenuIcon from '@mui/icons-material/Menu';
+import HistoryIcon from '@mui/icons-material/History';
+import AddIcon from '@mui/icons-material/Add';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ForumIcon from '@mui/icons-material/Forum';
 import axios from 'axios';
 import theme from './theme';
 
@@ -61,11 +66,57 @@ function App() {
   const [documents, setDocuments] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [sessions, setSessions] = useState<string[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(true);
 
   useEffect(() => {
     fetchModels();
     fetchDocuments();
+    fetchSessions();
   }, []);
+
+  const fetchSessions = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/sessions`);
+      setSessions(response.data.sessions);
+    } catch (error) {
+       console.error("Error fetching sessions:", error);
+    }
+  };
+
+  const loadSession = async (sessionId: string) => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/sessions/${sessionId}`);
+      setMessages(response.data.messages);
+      setCurrentSessionId(sessionId);
+    } catch (error) {
+      console.error("Error loading session:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startNewChat = () => {
+    setMessages([]);
+    setCurrentSessionId(null);
+  };
+
+  const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!window.confirm("Delete this chat history?")) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/sessions/${sessionId}`);
+      fetchSessions();
+      if (currentSessionId === sessionId) {
+        startNewChat();
+      }
+    } catch (error) {
+      console.error("Error deleting session:", error);
+    }
+  };
 
   const fetchModels = async () => {
     try {
@@ -104,7 +155,8 @@ function App() {
         },
         body: JSON.stringify({
           question: input,
-          model: selectedModel
+          model: selectedModel,
+          session_id: currentSessionId
         }),
       });
 
@@ -131,7 +183,13 @@ function App() {
         // Handle multiple potential lines of metadata
         const lines = chunk.split('\n');
         for (const line of lines) {
-           if (line.startsWith('SOURCE_METADATA:')) {
+           if (line.startsWith('SESSION_ID:')) {
+             const sid = line.replace('SESSION_ID:', '');
+             if (sid !== currentSessionId) {
+               setCurrentSessionId(sid);
+               fetchSessions();
+             }
+           } else if (line.startsWith('SOURCE_METADATA:')) {
              try {
                sources = JSON.parse(line.replace('SOURCE_METADATA:', ''));
              } catch (e) {
@@ -273,7 +331,7 @@ function App() {
         >
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, px: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-              Knowledge Base
+              Maestro
             </Typography>
             <IconButton onClick={() => setSidebarOpen(false)} size="small" sx={{ opacity: 0.7 }}>
               <MenuIcon />
@@ -284,66 +342,149 @@ function App() {
             <Button
               variant="contained"
               fullWidth
-              component="label"
-              startIcon={uploading ? <CircularProgress size={18} color="inherit" variant={uploadProgress !== null ? "determinate" : "indeterminate"} value={uploadProgress || 0} /> : <CloudUploadIcon />}
-              disabled={uploading}
-              sx={{ py: 1.5, mb: 2 }}
+              startIcon={<AddIcon />}
+              onClick={startNewChat}
+              sx={{ py: 1.5, mb: 1.5, borderRadius: 2 }}
             >
-              {uploading ? (uploadProgress !== null ? `Processing ${uploadProgress}%` : 'Processing...') : 'Upload Data'}
-              <input type="file" hidden onChange={handleFileUpload} accept=".pdf,.txt,.md" />
+              New Chat
             </Button>
-            <Button
-              variant="outlined"
-              fullWidth
-              color="error"
-              startIcon={<DeleteSweepIcon />}
-              onClick={handleClear}
-              sx={{ py: 1.5, borderColor: 'rgba(211, 47, 47, 0.3)', '&:hover': { borderColor: 'error.main' } }}
-            >
-              Clear Workspace
-            </Button>
+            
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="outlined"
+                fullWidth
+                component="label"
+                disabled={uploading}
+                startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : <CloudUploadIcon />}
+                size="small"
+                sx={{ py: 1 }}
+              >
+                {uploading ? (uploadProgress !== null ? `${uploadProgress}%` : '...') : 'Upload'}
+                <input type="file" hidden onChange={handleFileUpload} accept=".pdf,.txt,.md" />
+              </Button>
+              <Button
+                variant="outlined"
+                fullWidth
+                color="error"
+                size="small"
+                startIcon={<DeleteSweepIcon />}
+                onClick={handleClear}
+                sx={{ py: 1, borderColor: 'rgba(211, 47, 47, 0.2)' }}
+              >
+                Clear
+              </Button>
+            </Box>
           </Box>
 
-          <Typography variant="overline" sx={{ px: 2, mb: 1, display: 'block', opacity: 0.5, fontWeight: 700 }}>
-            Source Documents
-          </Typography>
+          {/* Chat History Section */}
+          <Box 
+            onClick={() => setHistoryOpen(!historyOpen)}
+            sx={{ 
+              px: 1, mb: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+              cursor: 'pointer', opacity: 0.8, '&:hover': { opacity: 1 } 
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <HistoryIcon sx={{ fontSize: 18 }} />
+              <Typography variant="overline" sx={{ fontWeight: 700 }}>Chat History</Typography>
+            </Box>
+            {historyOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </Box>
 
-          <List sx={{ flexGrow: 1, overflowY: 'auto' }}>
-            {documents.length === 0 && (
-              <Box sx={{ p: 4, textAlign: 'center', opacity: 0.4 }}>
-                <DescriptionIcon sx={{ fontSize: 40, mb: 1 }} />
-                <Typography variant="body2">No sources yet</Typography>
-              </Box>
-            )}
-            {documents.map((doc) => (
-              <ListItem
-                key={doc}
-                secondaryAction={
-                  <IconButton edge="end" onClick={() => handleDeleteDocument(doc)} size="small" 
-                    sx={{ opacity: 0, '.MuiListItem-root:hover &': { opacity: 0.5 }, '&:hover': { opacity: '1 !important', color: 'error.main' } }}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                }
-                sx={{ 
-                  mb: 0.5, 
-                  bgcolor: 'rgba(255, 255, 255, 0.02)',
-                  '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.05)' }
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 36 }}>
-                  <DescriptionIcon color="primary" fontSize="small" sx={{ opacity: 0.7 }} />
-                </ListItemIcon>
-                <ListItemText 
-                  primary={doc} 
-                  primaryTypographyProps={{ 
-                    variant: 'body2', 
-                    noWrap: true,
-                    fontWeight: 500
-                  }} 
-                />
-              </ListItem>
-            ))}
-          </List>
+          {historyOpen && (
+            <List sx={{ flexGrow: 1, overflowY: 'auto', mb: 2, maxHeight: '40vh' }}>
+              {sessions.length === 0 && (
+                <Box sx={{ p: 2, textAlign: 'center', opacity: 0.4 }}>
+                  <Typography variant="caption">No history yet</Typography>
+                </Box>
+              )}
+              {sessions.map((sid) => (
+                <ListItem
+                  key={sid}
+                  onClick={() => loadSession(sid)}
+                  secondaryAction={
+                    <IconButton edge="end" onClick={(e) => handleDeleteSession(sid, e)} size="small" 
+                      sx={{ opacity: 0, '.MuiListItem-root:hover &': { opacity: 0.5 }, '&:hover': { opacity: '1 !important', color: 'error.main' } }}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  }
+                  sx={{ 
+                    mb: 0.5, 
+                    borderRadius: 1,
+                    cursor: 'pointer',
+                    bgcolor: currentSessionId === sid ? 'rgba(129, 140, 248, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+                    borderColor: currentSessionId === sid ? 'primary.main' : 'transparent',
+                    borderLeft: '3px solid',
+                    '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.05)' }
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <ForumIcon sx={{ fontSize: 16, color: currentSessionId === sid ? 'primary.main' : 'inherit', opacity: 0.7 }} />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={sid.includes('_') ? sid.replace(/_/g, ' ') : sid.replace(/(\d{2})-(\d{2})-(\d{2})$/, '$1:$2:$3')} 
+                    primaryTypographyProps={{ 
+                      variant: 'caption', 
+                      noWrap: true,
+                      fontWeight: currentSessionId === sid ? 700 : 500
+                    }} 
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+
+          {/* Sources Section */}
+          <Box 
+            onClick={() => setSourcesOpen(!sourcesOpen)}
+            sx={{ 
+              px: 1, mb: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+              cursor: 'pointer', opacity: 0.8, '&:hover': { opacity: 1 } 
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <DescriptionIcon sx={{ fontSize: 18 }} />
+              <Typography variant="overline" sx={{ fontWeight: 700 }}>Source Documents</Typography>
+            </Box>
+            {sourcesOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </Box>
+
+          {sourcesOpen && (
+            <List sx={{ flexGrow: 0, overflowY: 'auto', maxHeight: '30vh' }}>
+              {documents.length === 0 && (
+                <Box sx={{ p: 2, textAlign: 'center', opacity: 0.4 }}>
+                  <Typography variant="caption">No sources yet</Typography>
+                </Box>
+              )}
+              {documents.map((doc) => (
+                <ListItem
+                  key={doc}
+                  secondaryAction={
+                    <IconButton edge="end" onClick={() => handleDeleteDocument(doc)} size="small" 
+                      sx={{ opacity: 0, '.MuiListItem-root:hover &': { opacity: 0.5 }, '&:hover': { opacity: '1 !important', color: 'error.main' } }}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  }
+                  sx={{ 
+                    mb: 0.5, 
+                    bgcolor: 'rgba(255, 255, 255, 0.01)',
+                    '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.03)' }
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <DescriptionIcon fontSize="small" sx={{ fontSize: 16, color: 'primary.main', opacity: 0.6 }} />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={doc} 
+                    primaryTypographyProps={{ 
+                      variant: 'caption', 
+                      noWrap: true
+                    }} 
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
           
           <Box sx={{ mt: 'auto', pt: 2, borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
             <FormControl fullWidth size="small">

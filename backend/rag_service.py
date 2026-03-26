@@ -15,8 +15,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 COLLECTION_NAME = "rag_collection"
+SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 EMBEDDING_MODEL = "nomic-embed-text"
 TOP_K = 3 # Optimal for small models like 1B/3B and slow hardware
@@ -65,7 +67,7 @@ class RAGService:
             progress = min(100, int(((i + len(batch)) / total_chunks) * 100))
             yield progress
 
-    def query(self, question: str, model_name: str = None, stream: bool = False):
+    def query(self, question: str, model_name: str = None, stream: bool = False, chat_history: List = None):
         if model_name and model_name != self.model_name:
             self.model_name = model_name
             self._init_vector_store()
@@ -86,6 +88,7 @@ class RAGService:
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", system_prompt),
+                ("placeholder", "{chat_history}"),
                 ("human", "{input}"),
             ]
         )
@@ -96,10 +99,14 @@ class RAGService:
         
         import time
         start_time = time.time()
+        
+        # Prepare input with chat history
+        input_data = {"input": question, "chat_history": chat_history or []}
+
         if stream:
-            return rag_chain.stream({"input": question})
+            return rag_chain.stream(input_data)
         else:
-            response = rag_chain.invoke({"input": question})
+            response = rag_chain.invoke(input_data)
             latency = time.time() - start_time
             sources = []
             for doc in response.get("context", []):
@@ -143,3 +150,30 @@ class RAGService:
         if os.path.exists(CHROMA_PATH):
             shutil.rmtree(CHROMA_PATH)
         self._init_vector_store()
+
+    def list_sessions(self) -> List[str]:
+        if not os.path.exists(SESSIONS_DIR):
+            return []
+        sessions = [f.replace(".json", "") for f in os.listdir(SESSIONS_DIR) if f.endswith(".json")]
+        # Sort by modification time (newest first)
+        sessions.sort(key=lambda x: os.path.getmtime(os.path.join(SESSIONS_DIR, x + ".json")), reverse=True)
+        return sessions
+
+    def load_session(self, session_id: str) -> List[dict]:
+        file_path = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+        if not os.path.exists(file_path):
+            return []
+        import json
+        with open(file_path, "r") as f:
+            return json.load(f)
+
+    def save_session(self, session_id: str, messages: List[dict]):
+        import json
+        file_path = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+        with open(file_path, "w") as f:
+            json.dump(messages, f, indent=2)
+
+    def delete_session(self, session_id: str):
+        file_path = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+        if os.path.exists(file_path):
+            os.remove(file_path)
