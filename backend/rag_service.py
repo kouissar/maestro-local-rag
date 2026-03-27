@@ -9,6 +9,8 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
+from langchain.retrievers import BM25Retriever, EnsembleRetriever, ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import FlashrankRerank
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +38,22 @@ class RAGService:
             embedding_function=self.embeddings,
             persist_directory=CHROMA_PATH
         )
+        self._refresh_bm25_retriever()
+
+    def _refresh_bm25_retriever(self):
+        # Efficiently pull all chunks from Chroma to build BM25 index
+        results = self.vector_store.get()
+        if results and results["documents"]:
+            docs = []
+            for i in range(len(results["ids"])):
+                docs.append(Document(
+                   page_content=results["documents"][i],
+                   metadata=results["metadatas"][i]
+                ))
+            self.bm25_retriever = BM25Retriever.from_documents(docs)
+            self.bm25_retriever.k = TOP_K * 2
+        else:
+            self.bm25_retriever = None
 
     def process_document(self, file_path: str):
         ext = os.path.splitext(file_path)[1].lower()
@@ -66,6 +84,9 @@ class RAGService:
             self.vector_store.add_documents(batch)
             progress = min(100, int(((i + len(batch)) / total_chunks) * 100))
             yield progress
+        
+        # After processing all chunks, refresh BM25
+        self._refresh_bm25_retriever()
 
     def query(self, question: str, model_name: str = None, stream: bool = False, chat_history: List = None):
         if model_name and model_name != self.model_name:
@@ -94,8 +115,27 @@ class RAGService:
         )
         
         question_answer_chain = create_stuff_documents_chain(llm, prompt)
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": TOP_K})
-        rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+        
+        # Base retrievers
+        chroma_retriever = self.vector_store.as_retriever(search_kwargs={"k": TOP_K * 2})
+        
+        # Hybrid Search (Ensemble)
+        if self.bm25_retriever:
+            ensemble_retriever = EnsembleRetriever(
+                retrievers=[chroma_retriever, self.bm25_retriever],
+                weights=[0.5, 0.5]
+            )
+        else:
+            ensemble_retriever = chroma_retriever
+            
+        # Re-ranking stage using FlashRank
+        compressor = FlashrankRerank()
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, 
+            base_retriever=ensemble_retriever
+        )
+        
+        rag_chain = create_retrieval_chain(compression_retriever, question_answer_chain)
         
         import time
         start_time = time.time()
@@ -140,6 +180,7 @@ class RAGService:
     def delete_document(self, filename: str):
         # Delete all chunks associated with this filename
         self.vector_store.delete(where={"source_file": filename})
+        self._refresh_bm25_retriever()
         
         # Also delete local file if it exists
         file_path = os.path.join(UPLOAD_DIR, filename)
@@ -150,6 +191,7 @@ class RAGService:
         if os.path.exists(CHROMA_PATH):
             shutil.rmtree(CHROMA_PATH)
         self._init_vector_store()
+        self._refresh_bm25_retriever()
 
     def list_sessions(self) -> List[str]:
         if not os.path.exists(SESSIONS_DIR):

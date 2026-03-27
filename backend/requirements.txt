@@ -13,3 +13,5 @@ unstructured
 markdown
 python-multipart
 pymupdf
+rank_bm25
+flashrank
