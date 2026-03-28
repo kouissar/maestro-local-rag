@@ -538,7 +538,7 @@ function App() {
                 </IconButton>
               )}
               <Typography variant="h5" sx={{ fontWeight: 800, background: 'linear-gradient(90deg, #818cf8, #fb7185)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                Maestro RAG
+                Maestro Local Knowledge Base
               </Typography>
             </Box>
             <Typography variant="body2" sx={{ opacity: 0.6, fontWeight: 500 }}>
@@ -555,9 +555,10 @@ function App() {
             flexDirection: 'column', 
             gap: 3,
             scrollBehavior: 'smooth',
-            maxWidth: '1000px',
             width: '100%',
-            mx: 'auto'
+            px: 6,
+            pt: 4,
+            pb: 12
           }}>
             {messages.length === 0 && (
               <Box sx={{ 
@@ -722,9 +723,7 @@ function App() {
           <Box sx={{ 
             p: 4, 
             pt: 2,
-            maxWidth: '1000px',
             width: '100%',
-            mx: 'auto'
           }}>
             <Paper 
               elevation={3}
