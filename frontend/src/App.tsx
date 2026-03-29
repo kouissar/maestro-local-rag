@@ -82,9 +82,29 @@ function App() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [temperature, setTemperature] = useState(0.0);
-  const [topP, setTopP] = useState(0.9);
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const [temperature, setTemperature] = useState(() => {
+    const saved = localStorage.getItem('maestro_temperature');
+    return saved !== null ? parseFloat(saved) : 0.0;
+  });
+  const [topP, setTopP] = useState(() => {
+    const saved = localStorage.getItem('maestro_topP');
+    return saved !== null ? parseFloat(saved) : 0.9;
+  });
+  const [systemPrompt, setSystemPrompt] = useState(() => {
+    return localStorage.getItem('maestro_systemPrompt') || "";
+  });
+
+  useEffect(() => {
+    localStorage.setItem('maestro_temperature', temperature.toString());
+  }, [temperature]);
+
+  useEffect(() => {
+    localStorage.setItem('maestro_topP', topP.toString());
+  }, [topP]);
+
+  useEffect(() => {
+    localStorage.setItem('maestro_systemPrompt', systemPrompt);
+  }, [systemPrompt]);
 
   useEffect(() => {
     fetchModels();
