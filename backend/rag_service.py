@@ -88,14 +88,20 @@ class RAGService:
         # After processing all chunks, refresh BM25
         self._refresh_bm25_retriever()
 
-    def query(self, question: str, model_name: str = None, stream: bool = False, chat_history: List = None):
+    def query(self, question: str, model_name: str = None, stream: bool = False, chat_history: List = None, 
+              temperature: float = 0, top_p: float = 0.9, custom_system_prompt: str = None):
         if model_name and model_name != self.model_name:
             self.model_name = model_name
             self._init_vector_store()
         
-        llm = ChatOllama(model=self.model_name, streaming=stream)
+        llm = ChatOllama(
+            model=self.model_name, 
+            streaming=stream,
+            temperature=temperature,
+            top_p=top_p
+        )
         
-        system_prompt = (
+        system_prompt = custom_system_prompt or (
             "You are an assistant for question-answering tasks. "
             "Use the following pieces of retrieved context to answer "
             "the question. If you don't know the answer, say that you "
@@ -152,7 +158,8 @@ class RAGService:
             for doc in response.get("context", []):
                 sources.append({
                     "source": doc.metadata.get("source_file", "Unknown"),
-                    "content": doc.page_content[:200] + "..." # Snippet
+                    "content": doc.page_content[:200] + "...",
+                    "relevance_score": doc.metadata.get("relevance_score", 0.0)
                 })
             return {
                 "answer": response["answer"],

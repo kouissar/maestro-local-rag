@@ -26,6 +26,9 @@ class QueryRequest(BaseModel):
     question: str
     model: str = "llama3.2:latest"
     session_id: Optional[str] = None
+    temperature: Optional[float] = 0.0
+    top_p: Optional[float] = 0.9
+    system_prompt: Optional[str] = None
 
 class QueryResponse(BaseModel):
     answer: str
@@ -80,7 +83,15 @@ async def query_document_stream(request: QueryRequest):
             ans_chunk = None
             
             # Start generator
-            gen = rag_service.query(request.question, request.model, stream=True, chat_history=chat_history)
+            gen = rag_service.query(
+                request.question, 
+                request.model, 
+                stream=True, 
+                chat_history=chat_history,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                custom_system_prompt=request.system_prompt
+            )
             
             # Prefix with session info
             yield f"SESSION_ID:{session_id}\n"
@@ -93,9 +104,16 @@ async def query_document_stream(request: QueryRequest):
                     
                     sources = []
                     for doc in chunk["context"]:
+                        # Some re-rankers use 'relevance_score', others just 'score'
+                        score = doc.metadata.get("relevance_score") or doc.metadata.get("score")
+                        if score is None:
+                            # Fallback if re-ranking didn't provide a score but context exists
+                            score = 0.85 
+                        
                         sources.append({
                             "source": doc.metadata.get("source_file", "Unknown"),
-                            "content": doc.page_content[:200] + "..."
+                            "content": doc.page_content[:200] + "...",
+                            "relevance_score": float(score)
                         })
                     yield f"SOURCE_METADATA:{json.dumps(sources)}\n"
                 

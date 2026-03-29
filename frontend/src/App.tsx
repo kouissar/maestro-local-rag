@@ -30,6 +30,16 @@ import AddIcon from '@mui/icons-material/Add';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ForumIcon from '@mui/icons-material/Forum';
+import SettingsIcon from '@mui/icons-material/Settings';
+import TuneIcon from '@mui/icons-material/Tune';
+import { 
+  Slider, 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  DialogActions,
+  LinearProgress
+} from '@mui/material';
 import axios from 'axios';
 import theme from './theme';
 
@@ -47,6 +57,7 @@ interface Performance {
 interface Source {
   source: string;
   content: string;
+  relevance_score?: number;
 }
 
 interface Message {
@@ -70,6 +81,10 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [temperature, setTemperature] = useState(0.0);
+  const [topP, setTopP] = useState(0.9);
+  const [systemPrompt, setSystemPrompt] = useState("");
 
   useEffect(() => {
     fetchModels();
@@ -156,7 +171,10 @@ function App() {
         body: JSON.stringify({
           question: input,
           model: selectedModel,
-          session_id: currentSessionId
+          session_id: currentSessionId,
+          temperature: temperature,
+          top_p: topP,
+          system_prompt: systemPrompt || undefined
         }),
       });
 
@@ -541,9 +559,18 @@ function App() {
                 Maestro Local Knowledge Base
               </Typography>
             </Box>
-            <Typography variant="body2" sx={{ opacity: 0.6, fontWeight: 500 }}>
-              {selectedModel}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography variant="body2" sx={{ opacity: 0.6, fontWeight: 500 }}>
+                {selectedModel}
+              </Typography>
+              <IconButton 
+                size="small" 
+                onClick={() => setSettingsOpen(true)}
+                sx={{ opacity: 0.6, '&:hover': { opacity: 1, color: 'primary.main' } }}
+              >
+                <SettingsIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Box>
 
           {/* Chat Messages */}
@@ -641,12 +668,28 @@ function App() {
                               borderLeft: '2px solid',
                               borderColor: 'primary.main',
                             }}>
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block' }}>
-                                {s.source}
-                              </Typography>
-                              <Typography variant="caption" sx={{ opacity: 0.7, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                "{s.content}"
-                              </Typography>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                                    {s.source}
+                                  </Typography>
+                                  {s.relevance_score !== undefined && (
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <Typography variant="caption" sx={{ fontSize: '0.6rem', opacity: 0.5 }}>
+                                        Relevance: {(s.relevance_score * 100).toFixed(0)}%
+                                      </Typography>
+                                      <Box sx={{ width: 40, height: 4, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1, overflow: 'hidden' }}>
+                                        <Box sx={{ 
+                                          height: '100%', 
+                                          width: `${s.relevance_score * 100}%`, 
+                                          bgcolor: s.relevance_score > 0.7 ? 'success.main' : 'warning.main' 
+                                        }} />
+                                      </Box>
+                                    </Box>
+                                  )}
+                                </Box>
+                                <Typography variant="caption" sx={{ opacity: 0.7, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                  "{s.content}"
+                                </Typography>
                             </Box>
                           ))}
                         </Box>
@@ -781,6 +824,78 @@ function App() {
           </Box>
         </Box>
       </Box>
+      <Dialog 
+        open={settingsOpen} 
+        onClose={() => setSettingsOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          className: "glass",
+          sx: { borderRadius: 3, p: 1 }
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 700 }}>
+          <TuneIcon color="primary" /> Advanced Model Settings
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                Temperature <span>{temperature.toFixed(1)}</span>
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.5, display: 'block', mb: 1.5 }}>
+                Controls randomness. Higher values make output more creative, lower values more focused.
+              </Typography>
+              <Slider 
+                value={temperature} 
+                onChange={(_, v) => setTemperature(v as number)} 
+                min={0} max={1} step={0.1}
+                valueLabelDisplay="auto"
+              />
+            </Box>
+            
+            <Box>
+              <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                Top-P <span>{topP.toFixed(2)}</span>
+              </Typography>
+              <Typography variant="caption" sx={{ opacity: 0.5, display: 'block', mb: 1.5 }}>
+                Nucleus sampling. Probability threshold for choosing next tokens.
+              </Typography>
+              <Slider 
+                value={topP} 
+                onChange={(_, v) => setTopP(v as number)} 
+                min={0} max={1} step={0.05}
+                valueLabelDisplay="auto"
+              />
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>Custom System Prompt</Typography>
+              <Typography variant="caption" sx={{ opacity: 0.5, display: 'block', mb: 1.5 }}>
+                Overrides the default behavior of the assistant. Leave blank for default.
+              </Typography>
+              <TextField 
+                fullWidth 
+                multiline 
+                rows={4} 
+                placeholder="You are an expert researcher..."
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                sx={{ 
+                  bgcolor: 'rgba(0,0,0,0.2)', 
+                  borderRadius: 2,
+                  '& .MuiOutlinedInput-notchedOutline': { border: 'none' }
+                }}
+              />
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 3 }}>
+          <Button onClick={() => setSettingsOpen(false)} variant="contained" sx={{ px: 4, borderRadius: 2 }}>
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
     </ThemeProvider>
   );
 }
