@@ -103,18 +103,15 @@ class RAGService:
         
         default_system_prompt = (
             "You are an assistant for question-answering tasks. "
-            "Use the following pieces of retrieved context to answer "
-            "the question. If you don't know the answer, say that you "
-            "don't know. Use three sentences maximum and keep the "
-            "answer concise. "
+            "If you don't know the answer, say that you don't know. "
             "The answer MUST be exclusively from the provided documents."
         )
-        base_prompt = custom_system_prompt or default_system_prompt
-        system_prompt = base_prompt + "\n\n{context}"
+        base_prompt = custom_system_prompt if custom_system_prompt else default_system_prompt
         
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", system_prompt),
+                ("system", base_prompt),
+                ("human", "Here is retrieved context from documents to aid your answer:\n\n{context}"),
                 ("placeholder", "{chat_history}"),
                 ("human", "{input}"),
             ]
